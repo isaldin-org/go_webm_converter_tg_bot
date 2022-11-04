@@ -1,0 +1,5 @@
+.vscode
+main
+.env
+boltdb_files
+.DS_Store
