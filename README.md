@@ -1,5 +1,10 @@
 ## Preparations
 Create `.env` file and fill necessary values
+```
+TOKEN=<bot_token>
+DEBUG=<true if going to debug>
+ALLOWED_CHAT_ID=<allowed chat id>
+```
 
 ## Run
 Build image \
