@@ -7,28 +7,26 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"regexp"
 	"strconv"
 
 	"github.com/boltdb/bolt"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-var allowedChatId, _ = strconv.ParseInt(os.Getenv("ALLOWED_CHAT_ID"), 0, 64)
-var db, _ = bolt.Open("boltdb_files/webms.db", 0600, nil)
-var webmUrlBucketName = "url_to_file_id"
-var urlChan = make(chan *tgbotapi.Update)
+var (
+	allowedChatId, _  = strconv.ParseInt(os.Getenv("ALLOWED_CHAT_ID"), 0, 64)
+	db, dbErr         = bolt.Open("boltdb_files/webms_checksums.db", 0600, nil)
+	webmUrlBucketName = "url_to_file_id"
+	urlChan           = make(chan *tgbotapi.Update)
+)
 
 func main() {
+	if dbErr != nil {
+		log.Panic("DB opening error")
+	}
 	defer db.Close()
 
-	err := db.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucketIfNotExists([]byte("url_to_file_id")); err != nil {
-			log.Fatal("Db error", err)
-			return err
-		}
-		return nil
-	})
+	err := initDB()
 	if err != nil {
 		log.Panic(err)
 	}
@@ -61,16 +59,6 @@ func main() {
 			continue
 		}
 
-		fileId, _ := getFileIDForUrl(url)
-		if fileId != "" {
-			log.Printf("File id for url %s already exists", url)
-			err := sendFromFileID(bot, &update, fileId)
-			if err != nil {
-				responseWithError(bot, &update, err)
-			}
-			continue
-		}
-
 		log.Printf("Has been added url to queue: [%s]", url)
 		urlChan <- &update
 		continue
@@ -81,11 +69,6 @@ func listenUrls(bot *tgbotapi.BotAPI) {
 	for {
 		update := <-urlChan
 		url := update.Message.Text
-
-		if fileId, _ := getFileIDForUrl(url); fileId != "" {
-			sendFromFileID(bot, update, fileId)
-			continue
-		}
 
 		log.Printf("Start proccessing url [%s]", url)
 
@@ -103,51 +86,6 @@ func listenUrls(bot *tgbotapi.BotAPI) {
 			continue
 		}
 	}
-}
-
-func sendFromFileID(bot *tgbotapi.BotAPI, update *tgbotapi.Update, fileId string) error {
-	msg := tgbotapi.NewVideo(update.Message.Chat.ID, tgbotapi.FileID(fileId))
-	msg.ReplyToMessageID = update.Message.MessageID
-	_, err := bot.Send(msg)
-
-	return err
-}
-
-func isWebmUrl(url string) bool {
-	match, err := regexp.Match("^http(s)?:\\/\\/[a-zA-Z0-9]{2,256}\\.[a-z]{2,6}\\/.*\\.webm$", []byte(url))
-
-	if err != nil {
-		return false
-	}
-
-	return match
-}
-
-func getBotToken() string {
-	return os.Getenv("TOKEN")
-}
-
-func isUrlSuitableForConvertation(url string) (bool, error) {
-	resp, err := http.Head(url)
-	if err != nil {
-		return false, errors.New("failed to receive file headers from url")
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return false, errors.New("status code is not OK")
-	}
-
-	fileType := resp.Header.Get("Content-Type")
-	if fileType != "video/webm" {
-		return false, errors.New("content type is not suitable to webm")
-	}
-
-	size, _ := strconv.Atoi(resp.Header.Get("Content-Length"))
-	if size > 50*1024*1024 {
-		return false, errors.New("size should less than 50mb")
-	}
-
-	return true, nil
 }
 
 func downloadConvertAndSend(bot *tgbotapi.BotAPI, update *tgbotapi.Update, url string) (string, error) {
@@ -180,13 +118,28 @@ func downloadConvertAndSend(bot *tgbotapi.BotAPI, update *tgbotapi.Update, url s
 	}
 	log.Println("File downloaded")
 
+	fileHash, err := getFileHash()
+	if err == nil {
+		fileId, err := fileIdByChecksum(fileHash)
+		if err == nil {
+			log.Println("Already sent. Return by FileID")
+			video := tgbotapi.NewVideo(update.Message.Chat.ID, tgbotapi.FileID(fileId))
+			video.ReplyToMessageID = update.Message.MessageID
+			if _, err := bot.Send(video); err != nil {
+				log.Println("Something going wrong when send video")
+				return "", err
+			}
+			return "success", nil
+		}
+	}
+
 	cmd := exec.Command("ffmpeg", "-i", "temp.webm", "-crf", "26", "video.mp4")
 	defer os.Remove("video.mp4")
 
 	log.Println("Start converting")
 	if err := cmd.Run(); err != nil {
 		log.Println(err)
-		return "", err
+		return "", errors.New("trouble with ffmpeg. Niabissuy")
 	}
 	log.Println("Converting has done")
 
@@ -212,7 +165,7 @@ func downloadConvertAndSend(bot *tgbotapi.BotAPI, update *tgbotapi.Update, url s
 
 	db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(webmUrlBucketName))
-		return b.Put([]byte(url), []byte(sendVideo.Video.FileID))
+		return b.Put([]byte(fileHash), []byte(sendVideo.Video.FileID))
 	})
 
 	return "success", nil
@@ -226,14 +179,39 @@ func responseWithError(bot *tgbotapi.BotAPI, update *tgbotapi.Update, err error)
 	}
 }
 
-func getFileIDForUrl(url string) (string, error) {
-	var fileId = ""
-	err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte(webmUrlBucketName))
-		v := b.Get([]byte(url))
-		fileId = string(v)
+func initDB() error {
+	err := db.Update(func(tx *bolt.Tx) error {
+		if _, err := tx.CreateBucketIfNotExists([]byte("url_to_file_id")); err != nil {
+			log.Fatal("Db error", err)
+			return err
+		}
 		return nil
 	})
+
+	return err
+}
+
+func getBotToken() string {
+	return os.Getenv("TOKEN")
+}
+
+func fileIdByChecksum(checksum string) (string, error) {
+	fileId := ""
+
+	err := db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(webmUrlBucketName))
+		fileId = string(b.Get([]byte(checksum)))
+
+		return nil
+	})
+
+	if err != nil {
+		return fileId, err
+	}
+
+	if fileId == "" {
+		return fileId, errors.New("not found")
+	}
 
 	return fileId, err
 }
