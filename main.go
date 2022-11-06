@@ -61,11 +61,18 @@ func main() {
 		url := update.Message.Text
 
 		if !isWebmUrl(url) {
-			log.Printf("Got url %s, but not webm", url)
 			continue
 		}
 
 		log.Printf("Has been added url to queue: [%s]", url)
+
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "Ща все будет, братан, повремени")
+		msg.ReplyToMessageID = update.Message.MessageID
+		_, err := bot.Send(msg)
+		if err != nil {
+			log.Println("Couldn't send reply about starting processing")
+		}
+
 		urlChan <- WebmMessage{
 			message:   update.Message.Text,
 			messageId: update.Message.MessageID,
@@ -149,9 +156,9 @@ func downloadConvertAndSend(bot *tgbotapi.BotAPI, messageStruct WebmMessage, url
 	log.Println("Start converting")
 	if err := cmd.Run(); err != nil {
 		log.Println(err)
-		return "", errors.New("trouble with ffmpeg. Niabissuy")
+		return "", errors.New("проблемы с конвертацией, ниабиссуй. Попробуй еще раз")
 	}
-	log.Println("Converting has done")
+	log.Println("Converting has been done")
 
 	videoFile, err := os.ReadFile("video.mp4")
 	if err != nil {
