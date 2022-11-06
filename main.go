@@ -17,8 +17,14 @@ var (
 	allowedChatId, _  = strconv.ParseInt(os.Getenv("ALLOWED_CHAT_ID"), 0, 64)
 	db, dbErr         = bolt.Open("boltdb_files/webms_checksums.db", 0600, nil)
 	webmUrlBucketName = "url_to_file_id"
-	urlChan           = make(chan *tgbotapi.Update)
+	urlChan           = make(chan WebmMessage)
 )
+
+type WebmMessage struct {
+	message   string
+	messageId int
+	chatId    int64
+}
 
 func main() {
 	if dbErr != nil {
@@ -60,7 +66,11 @@ func main() {
 		}
 
 		log.Printf("Has been added url to queue: [%s]", url)
-		urlChan <- &update
+		urlChan <- WebmMessage{
+			message:   update.Message.Text,
+			messageId: update.Message.MessageID,
+			chatId:    update.Message.Chat.ID,
+		}
 		continue
 	}
 }
@@ -68,7 +78,7 @@ func main() {
 func listenUrls(bot *tgbotapi.BotAPI) {
 	for {
 		update := <-urlChan
-		url := update.Message.Text
+		url := update.message
 
 		log.Printf("Start proccessing url [%s]", url)
 
@@ -88,7 +98,7 @@ func listenUrls(bot *tgbotapi.BotAPI) {
 	}
 }
 
-func downloadConvertAndSend(bot *tgbotapi.BotAPI, update *tgbotapi.Update, url string) (string, error) {
+func downloadConvertAndSend(bot *tgbotapi.BotAPI, messageStruct WebmMessage, url string) (string, error) {
 	resp, err := http.Get(url)
 	if err != nil {
 		log.Println(err)
@@ -123,8 +133,8 @@ func downloadConvertAndSend(bot *tgbotapi.BotAPI, update *tgbotapi.Update, url s
 		fileId, err := fileIdByChecksum(fileHash)
 		if err == nil {
 			log.Println("Already sent. Return by FileID")
-			video := tgbotapi.NewVideo(update.Message.Chat.ID, tgbotapi.FileID(fileId))
-			video.ReplyToMessageID = update.Message.MessageID
+			video := tgbotapi.NewVideo(int64(messageStruct.chatId), tgbotapi.FileID(fileId))
+			video.ReplyToMessageID = messageStruct.messageId
 			if _, err := bot.Send(video); err != nil {
 				log.Println("Something going wrong when send video")
 				return "", err
@@ -148,11 +158,11 @@ func downloadConvertAndSend(bot *tgbotapi.BotAPI, update *tgbotapi.Update, url s
 		return "", err
 	}
 
-	video := tgbotapi.NewVideo(update.Message.Chat.ID, tgbotapi.FileBytes{
+	video := tgbotapi.NewVideo(messageStruct.chatId, tgbotapi.FileBytes{
 		Name:  "converted webm",
 		Bytes: videoFile,
 	})
-	video.ReplyToMessageID = update.Message.MessageID
+	video.ReplyToMessageID = messageStruct.messageId
 
 	log.Println("Sending video")
 
@@ -171,9 +181,9 @@ func downloadConvertAndSend(bot *tgbotapi.BotAPI, update *tgbotapi.Update, url s
 	return "success", nil
 }
 
-func responseWithError(bot *tgbotapi.BotAPI, update *tgbotapi.Update, err error) {
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, err.Error())
-	msg.ReplyToMessageID = update.Message.MessageID
+func responseWithError(bot *tgbotapi.BotAPI, messageStruct WebmMessage, err error) {
+	msg := tgbotapi.NewMessage(messageStruct.chatId, err.Error())
+	msg.ReplyToMessageID = messageStruct.messageId
 	if _, err := bot.Send(msg); err != nil {
 		log.Println("Some error", err)
 	}
