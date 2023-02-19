@@ -25,7 +25,7 @@ tasks:
     dir: k8s
     deps: [build]
     cmds:
-      - kubectl apply -f sealed-secrets.dev.yaml
+      - kubectl apply -f sealed-secrets.dev.yml
       - minikube image load {{.CONTAINER_IMAGE}}
       # if you have problems with connecting to local k8s cluster run below commands once for activating minikube:
       # minikube update-context
