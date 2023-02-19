@@ -19,11 +19,11 @@ spec:
           image: saldin/shebm_bot
           resources:
             limits:
-              cpu: "1"
-              memory: "256M"
+              cpu: "2"
+              memory: "2048M"
             requests:
               cpu: "0.5"
-              memory: "128M"
+              memory: "1024M"
           env:
             - name: TOKEN
               valueFrom:
