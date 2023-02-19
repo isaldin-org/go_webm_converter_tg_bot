@@ -1,0 +1,35 @@
+version: 3
+
+vars:
+  CONTAINER_IMAGE_NAME: saldin/shebm_bot
+  CONTAINER_IMAGE_TAG: {sh: git rev-parse --short HEAD}
+  CONTAINER_IMAGE: "{{.CONTAINER_IMAGE_NAME}}:{{.CONTAINER_IMAGE_TAG}}"
+  DOCKERFILE: Dockerfile
+  MINIKUBE_CONTEXT: minikube
+  CURRENT_CONTEXT: {sh: kubectl config current-context}
+
+tasks:
+  build:
+    desc: Build docker container image
+    cmds:
+      - docker build -t {{.CONTAINER_IMAGE}} . -f {{.DOCKERFILE}}
+
+  run:
+    desc: Local run of docker container
+    deps: [build]
+    cmds:
+      - docker run -t --env-file .env {{.CONTAINER_IMAGE}}
+
+  deploy:
+    desc: Deploy to minikube k8s cluster
+    dir: k8s
+    deps: [build]
+    cmds:
+      - kubectl apply -f sealed-secrets.dev.yaml
+      - minikube image load {{.CONTAINER_IMAGE}}
+      # if you have problems with connecting to local k8s cluster run below commands once for activating minikube:
+      # minikube update-context
+      # minikube start
+      - yq '.spec.template.spec.containers.[0].image = "{{.CONTAINER_IMAGE}}" | .spec.template.spec.containers.[0].imagePullPolicy = "Never"' deployment.yml | kubectl apply -f -
+    preconditions:
+      - sh: "[ {{.CURRENT_CONTEXT}} = {{.MINIKUBE_CONTEXT}} ]"

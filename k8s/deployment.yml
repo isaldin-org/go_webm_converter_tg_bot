@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: go-webm-bot-deployment
+  labels:
+    app: go-webm-bot
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: go-webm-bot
+  template:
+    metadata:
+      labels:
+        app: go-webm-bot
+    spec:
+      containers:
+        - name: go-webm-bot-app
+          image: saldin/shebm_bot
+          env:
+            - name: TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: BOT_TOKEN
+                  name: go-webm-bot
+            - name: ALLOWED_CHAT_ID
+              valueFrom:
+                secretKeyRef:
+                  key: ALLOWED_CHAT_ID
+                  name: go-webm-bot
