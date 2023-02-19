@@ -17,6 +17,13 @@ spec:
       containers:
         - name: go-webm-bot-app
           image: saldin/shebm_bot
+          resources:
+            limits:
+              cpu: "1"
+              memory: "256M"
+            requests:
+              cpu: "0.5"
+              memory: "128M"
           env:
             - name: TOKEN
               valueFrom:
