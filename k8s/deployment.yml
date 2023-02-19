@@ -22,8 +22,8 @@ spec:
               cpu: "2"
               memory: "2048M"
             requests:
-              cpu: "0.5"
-              memory: "1024M"
+              cpu: "2"
+              memory: "2048M"
           env:
             - name: TOKEN
               valueFrom:
